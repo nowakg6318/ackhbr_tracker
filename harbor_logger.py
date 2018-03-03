@@ -33,9 +33,9 @@ def CollectData():
     '''
 
     # Grab html from Port of Auckland page.
-    harbor_page = requests.get() # noqa
+    harbor_page = requests.get('') # noqa
     soup1 = bs4(harbor_page.content, 'html.parser')
-    headers = {} # noqa
+    headers = {'User-Agent': ''} # noqa
 
     csv_list = []
 
@@ -45,7 +45,10 @@ def CollectData():
         imo = ship_tag.find_next_sibling(attrs='lloydsNum').text.strip()
         previous_port = (ship_tag.find_next_siblings(attrs='port')[0]
                          .text.strip())
+
         next_port = ship_tag.find_next_siblings(attrs='port')[1].text.strip()
+        dock = (ship_tag.find_next_sibling(attrs='refs').text.strip()
+                .split()[0])
 
         if not int(imo):
             continue
@@ -66,7 +69,7 @@ def CollectData():
                               .find_next_sibling('b').text.strip()[:-2])
 
         ship_list = [name, imo, ship_type, flag, gross_tonnage,
-                     deadweight_tonnage, previous_port, next_port]
+                     deadweight_tonnage, dock, previous_port, next_port]
 
         csv_list.append(ship_list)
 
