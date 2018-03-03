@@ -94,7 +94,7 @@ def WriteData(data_list, file_name='auckland_harbor_data.csv'):
     '''
 
     #  Open File
-    file = open(file_name, 'a')
+    file = open(file_name, 'a', newline='')
     writer = csv.writer(file)
 
     #  Write information to csv file.
