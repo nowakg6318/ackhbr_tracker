@@ -8,7 +8,8 @@ Example:
     $ python harbor_logger.py()
 '''
 
-from bs4 import BeautifulSoup as bs4
+import bs4
+from bs4 import BeautifulSoup
 import requests
 
 import csv
@@ -34,6 +35,11 @@ def CollectData():
         None
     '''
 
+    # Changeable Strings
+    harbor_url = ''
+    ship_url_base = ''
+    headers = {'User-Agent': ''} # noqa
+
     #  Starting the logger
     logger_format = '%(asctime)s: %(levelname)s: %(message)s'
     logger_handler = TimedRotatingFileHandler('ackhbr.log',
@@ -49,83 +55,54 @@ def CollectData():
 
     # Grab html from Port of Auckland page.
     logger.info('Connecting to Harbor Page')
-    harbor_page = requests.get('') # noqa
-    if harbor_page.status_code != 200:
-        logger.error('Harbor Page: {}'.format(harbor_page))
-    else:
-        logger.debug('Harbor Page: {}'.format(harbor_page))
-        logger.info('Connected to Harbor Page.')
+    harbor_page = requests.get(harbor_url) # noqa
+    ResponseChecker(harbor_page)
 
-    soup1 = bs4(harbor_page.content, 'html.parser')
-    headers = {'User-Agent': ''} # noqa
+    soup1 = BeautifulSoup(harbor_page.content, 'html.parser')
 
     csv_list = []
 
     #  Grab html from each ship page.
-    for ship_tag in soup1.find_all('td', 'name'):
-        logger.debug('Finding Ship Name')
-        name = ship_tag.text.strip()
-        logger.debug('Ship name: {}'.format(name))
+    for tag in soup1.find_all('tr')[1:]:
+        ship_info1 = ([child.text.strip() for child in tag.children
+                       if isinstance(child, bs4.element.Tag)])
 
-        logger.debug('Finding Ship imo')
-        imo = ship_tag.find_next_sibling(attrs='lloydsNum').text.strip()
-        logger.debug('Ship imo: {}'.format(imo))
+        logger.debug('Ship data from harbor page: \n {}'
+                     .format(ship_info1))
 
-        logger.debug('Finding last port of ship.')
-        previous_port = (ship_tag.find_next_siblings(attrs='port')[0]
-                         .text.strip())
-        logger.debug('Previous port of ship: {}'.format(previous_port))
+        name = ship_info1[0]
+        imo = ship_info1[6]
+        previous_port = ship_info1[10]
+        next_port = ship_info1[11]
+        dock = ship_info1[4].split()[0]
 
-        logger.debug('Finding next port of ship.')
-        next_port = ship_tag.find_next_siblings(attrs='port')[1].text.strip()
-        logger.debug('Next port of ship: {}'.format(next_port))
-
-        logger.debug('Finding where the ship is docked.')
-        dock = (ship_tag.find_next_sibling(attrs='refs').text.strip()
-                .split()[0])
-        logger.debug('Ship dock: {}'.format(dock))
-
-        if not int(imo):
+        if int(imo) == 0:
             continue
 
-        logger.info('Connecting to Ship Page: {}'.format(name))
-        ship_page = requests.get('' # noqa
-                                 + str(imo), headers=headers)
+        ship_page = requests.get(ship_url_base + str(imo), headers=headers)
 
-        if harbor_page.status_code != 200:
-            logger.error('Harbor Page: {}'.format(harbor_page))
-        else:
-            logger.debug('Harbor Page: {}'.format(harbor_page))
-            logger.info('Connected to Ship Page: {}'.format(name))
+        ResponseChecker(ship_page)
+        soup2 = BeautifulSoup(ship_page.content, 'html.parser')
 
-        soup2 = bs4(ship_page.content, 'html.parser')
-        logger.info('Grabbing data for {}, imo: {}'.format(name, imo))
+        ship_type = (soup2.select('a[href*="vessels&ship_type_in"]')[1]
+                     .text.strip())
 
-        logger.debug('Finding Ship Type')
-        ship_type = (soup2.find('a', 'font-120').text.strip())
-        logger.debug('Ship Type: {}'.format(ship_type))
+        ship_info2 = ([tag.text.strip() for tag in soup2.find_all('b')
+                       if (tag.find_previous_sibling('span')
+                           and tag.text.strip())])
 
-        logger.debug('Finding Ship Flag')
-        flag = (soup2.find('span', string='Flag: ')
-                .find_next_sibling('b').text.strip()[:-5])
-        logger.debug('Flag: {}'.format(flag))
+        logger.debug('Ship data from ship page: \n {}'
+                     .format(ship_info2))
 
-        logger.debug('Finding Ship Gross Tonnage')
-        gross_tonnage = (soup2.find('span', string='Gross Tonnage: ')
-                         .find_next_sibling('b').text.strip())
-        logger.debug('Gross Tonnage: {}'.format(ship_type))
+        flag = ship_info2[3][:-5]
+        gross_tonnage = ship_info2[5]
+        deadweight_tonnage = ship_info2[6][:-2]
 
-        logger.debug('Finding Ship Deadweight Tonnage')
-        deadweight_tonnage = (soup2.find('span', string='Deadweight: ')
-                              .find_next_sibling('b').text.strip()[:-2])
-        logger.debug('Deadweight Tonnage: {}'.format(deadweight_tonnage))
-        logger.info('Successfully grabbed information for {}, imo: {}'
-                    .format(name, imo))
+        ship_list = ([name, imo, ship_type, flag, gross_tonnage,
+                      deadweight_tonnage, dock, previous_port, next_port])
 
-        ship_list = [name, imo, ship_type, flag, gross_tonnage,
-                     deadweight_tonnage, dock, previous_port, next_port]
-        logger.debug('List to be appended to csv file: \n {}'
-                     .format(ship_list))
+        logger.info('List to be appended to csv file: \n {}'
+                    .format(ship_list))
 
         csv_list.append(ship_list)
 
@@ -174,6 +151,32 @@ def WriteData(data_list, file_name='auckland_harbor_data.csv'):
     #  Close File
     file.close()
     logger.info('Closed File.')
+
+
+def ResponseChecker(response: requests.models.Response):
+    '''Checks and logs the request response status code of a website.
+
+    Args:
+        response (requests.models.Response): A requests response object
+        from a requests.get() call to a website.
+
+    Returns:
+        None
+
+    Raises:
+        None
+    '''
+
+    logger = logging.getLogger(__name__)
+
+    if response.status_code != 200:
+        logger.error('Failed to connect to: \n {}'
+                     .format(response.url))
+
+        logger.debug('Connection Code: {}'.format(response.status_code))
+    else:
+        logger.info('Successfully connected to : \n {}'
+                    .format(response.url))
 
 
 if __name__ == '__main__':
