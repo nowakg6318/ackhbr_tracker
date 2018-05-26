@@ -2,101 +2,106 @@
 '''
 
 import pandas as pd
+import numpy as np
 
 import pdb
 
 
-class HarborDataHandler():
+def Main(file_path, datadf_columns=['Name', 'IMO', 'Type', 'Flag',
+                                    'Gross Tonnage', 'Deadweight Tonnage',
+                                    'Dock', 'Previous Port', 'Next Port',
+                                    'Timestamp Enter', 'Timestamp Exit',
+                                    'Port Time']):
     '''
     '''
 
-    def __init__(self, file_path):
-        self.file_path = file_path
-        self.original_df = self._CSVToDF()
-        self.data_df = pd.DataFrame(columns=['Name', 'IMO',
-                                             'Type', 'Flag', 'Gross Tonnage',
-                                             'Deadweight Tonnage', 'Dock',
-                                             'Previous Port', 'Next Port',
-                                             'Timestamp Enter',
-                                             'Timestamp Exit', 'Port Time'])
+    original_df = _CSVtoDF(file_path)
+    data_df = _CreateDataDF(datadf_columns)
+    for ship_df in _SplitDFbyUniqueRowValue(original_df, 'Name'):
+        ship_trip_df_list = _SplitDFbyTimeIntervals(ship_df)
+        ship_trips_df = _CompressDFListintoDF(ship_trip_df_list,
+                                              datadf_columns)
+        data_df = _AppendDFtoDataDF(data_df, ship_trips_df)
+    return(data_df)
 
-    def Handle(self) -> pd.DataFrame:
-        '''
-        '''
 
-        for ship_name in self.original_df['Name'].unique():
-            subset_df = self._CreateSubsetDF(ship_name)
-            split_subsetdfs_list = self._SplitDFbyTimeIntervals(subset_df)
-            equivalent_shipdf_series_list = self._CompressDFintoSeries(
-                split_subsetdfs_list)
+def _CSVtoDF(file_path: str) -> pd.DataFrame: # noqa 
+    '''
+    '''
 
-            self._AddSeriesListtoDataDF(equivalent_shipdf_series_list)
+    data_column_namelist = (['Timestamp', 'Name', 'IMO', 'Type', 'Flag',
+                             'Gross Tonnage', 'Deadweight Tonnage', 'Dock',
+                             'Previous Port', 'Next Port'])
 
-        return(self.data_df)
+    dataframe = pd.read_csv(file_path, names=data_column_namelist)
+    dataframe['Timestamp'] = pd.to_datetime(dataframe['Timestamp'])
+    return(dataframe)
 
-    def _CSVToDF(self):
-        '''
-        '''
 
-        data_column_namelist = (['Timestamp', 'Name', 'IMO', 'Type', 'Flag',
-                                 'Gross Tonnage', 'Deadweight Tonnage', 'Dock',
-                                 'Previous Port', 'Next Port'])
+def _CreateDataDF(column_name_list: list) -> pd.DataFrame:
+    return(pd.DataFrame(columns=column_name_list))
 
-        dataframe = pd.read_csv(self.file_path, names=data_column_namelist)
-        dataframe['Timestamp'] = pd.to_datetime(dataframe['Timestamp'])
-        return(dataframe)
 
-    def _CreateSubsetDF(self, ship_name: str) -> pd.DataFrame:
-        '''
-        '''
+def _SplitDFbyUniqueRowValue(original_df, column_name) -> list:
+    '''
+    '''
 
-        subset_df = self.original_df.groupby(['Name']).get_group(ship_name)
-        subset_df.sort_values(['Timestamp'])
-        subset_df = subset_df.reset_index(drop=True)
-        subset_df['Time Difference'] = subset_df['Timestamp'].diff(1)
-        return(subset_df)
+    df_list = []
+    groupby_object = original_df.groupby(column_name)
+    print(len(groupby_object.groups))
+    for ship_name in groupby_object.groups.keys():
+        df = groupby_object.get_group(ship_name)
+        df.sort_values(['Timestamp'])
+        df = df.reset_index(drop=True)
+        df['Time Difference'] = df['Timestamp'].diff(1)
+        df_list.append(df)
+    return(df_list)
 
-    def _SplitDFbyTimeIntervals(self, subset_df: pd.DataFrame):
-        '''
-        '''
 
-        split_df_list = []
-        index_split_list = (subset_df.loc[subset_df['Time Difference']
-                            > pd.Timedelta('1 days')]
-                            .index.tolist())
+def _SplitDFbyTimeIntervals(df: pd.DataFrame):
+    '''
+    '''
 
-        index_split_list = [0] + index_split_list + [len(subset_df)]
+    split_df_list = []
+    index_split_list = (df.loc[df['Time Difference']
+                        > pd.Timedelta('1 days')]
+                        .index.tolist())
 
-        for i in range(len(index_split_list) - 1):
-            split_df_list.append(
-                subset_df[index_split_list[i]:index_split_list[i + 1]])
+    index_split_list = [0] + index_split_list + [len(df)]
 
-        return(split_df_list)
+    for i in range(len(index_split_list) - 1):
+        split_df_list.append(
+            df[index_split_list[i]:index_split_list[i + 1]])
 
-    def _CompressDFintoSeries(self, df_list: list) -> list:
-        '''
-        '''
+    return(split_df_list)
 
-        equivalent_series_list = []
-        for df in df_list:
-            df = df.reset_index(drop=True)
-            time_enter = df['Timestamp'].loc[0]
-            time_exit = df['Timestamp'].loc[len(df) - 1]
-            port_time = time_exit - time_enter
 
-            equivalent_series = (df[['Name', 'IMO',
-                                     'Type', 'Flag', 'Gross Tonnage',
-                                     'Deadweight Tonnage', 'Dock',
-                                     'Previous Port', 'Next Port']]
-                                 .loc[0].tolist()
-                                 + [time_enter, time_exit, port_time])
+def _CompressDFListintoDF(df_list: list,
+                          column_name_list: list) -> pd.DataFrame:
+    '''
+    '''
 
-            equivalent_series_list.append(equivalent_series)
-        return(equivalent_series_list)
+    new_df = pd.DataFrame(columns=column_name_list)
+    for df in df_list:
+        df = df.reset_index(drop=True)
+        nontime_df_data_list = (df[['Name', 'IMO', 'Type', 'Flag',
+                                    'Gross Tonnage', 'Deadweight Tonnage',
+                                    'Dock', 'Previous Port', 'Next Port']]
+                                .loc[0].tolist())
 
-    def _AddSeriesListtoDataDF(self, series_list: list) -> None:
-        '''
-        '''
+        time_enter = df['Timestamp'].loc[0]
+        time_exit = df['Timestamp'].loc[len(df) - 1]
+        port_time = time_exit - time_enter
+        new_df.loc[len(new_df)] = (nontime_df_data_list
+                                   + [time_enter, time_exit, port_time])
 
-        for series in series_list:
-            self.data_df.loc[len(self.data_df)] = series
+    return(new_df)
+
+
+def _AppendDFtoDataDF(data_df: pd.DataFrame, small_df: pd.DataFrame) -> None:
+    '''
+    '''
+
+    data_df = data_df.append(small_df)
+    data_df = data_df.reset_index(drop=True)
+    return(data_df)
